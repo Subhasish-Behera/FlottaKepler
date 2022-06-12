@@ -51,12 +51,12 @@ type CgroupTime struct {
 	CPUTime        [C.CPU_VECTOR_SIZE]uint16
 }
 
-type PodEnergy struct {
-	CGroupPID uint64
-	PID       uint64
-	PodName   string
-	Namespace string
-	Command   string
+type ContainerEnergy struct {
+	CGroupPID     uint64
+	PID           uint64
+	ContainerName string
+	Namespace     string
+	Command       string
 
 	AggCPUTime     float64
 	AggCPUCycles   uint64
@@ -87,7 +87,7 @@ type PodEnergy struct {
 	AvgCPUFreq float64
 }
 
-type CurrNodeEnergy struct {
+type CurrEdgeDeviceEnergy struct {
 	CPUTime     float64
 	CPUCycles   uint64
 	CPUInstr    uint64
@@ -105,16 +105,16 @@ const (
 )
 
 var (
-	podEnergy      = map[string]*PodEnergy{}
-	nodeEnergy     = map[string]float64{}
-	gpuEnergy      = map[uint32]float64{}
-	currNodeEnergy = &CurrNodeEnergy{}
-	cpuFrequency   = map[int32]uint64{}
-	nodeName, _    = os.Hostname()
-	cpuArch        = "unknown"
-	acpiPowerMeter = acpi.NewACPIPowerMeter()
-	numCPUs        = runtime.NumCPU()
-	lock           sync.Mutex
+	containerEnergy      = map[string]*ContainerEnergy{}
+	EdgeDeviceEnergy     = map[string]float64{}
+	gpuEnergy            = map[uint32]float64{}
+	currEdgeDeviceEnergy = &CurrEdgeDeviceEnergy{}
+	cpuFrequency         = map[int32]uint64{}
+	EdgeDeviceName, _    = os.Hostname()
+	cpuArch              = "unknown"
+	acpiPowerMeter       = acpi.NewACPIPowerMeter()
+	numCPUs              = runtime.NumCPU()
+	lock                 sync.Mutex
 )
 
 func init() {
@@ -136,7 +136,7 @@ func (c *Collector) reader() {
 			select {
 			case <-ticker.C:
 				cpuFrequency = acpiPowerMeter.GetCPUCoreFrequency()
-				nodeEnergy, _ = acpiPowerMeter.GetEnergyFromHost()
+				EdgeDeviceEnergy, _ = acpiPowerMeter.GetEnergyFromHost()
 
 				var aggCPUTime, avgFreq, totalCPUTime float64
 				var aggCPUCycles, aggCPUInstr, aggCacheMisses, aggBytesRead, aggBytesWrite uint64
@@ -171,10 +171,10 @@ func (c *Collector) reader() {
 
 				// calculate the total energy consumed in node from all sensors
 				var nodeEnergyTotal float64 = 0
-				for _, energy := range nodeEnergy {
+				for _, energy := range EdgeDeviceEnergy {
 					nodeEnergyTotal += energy
 				}
-				// ccalculate the other energy consumed besides CPU/GPU and memory
+				// calculate the other energy consumed besides CPU/GPU and memory
 				otherDelta := float64(0)
 				if nodeEnergyTotal > 0 {
 					otherDelta = nodeEnergyTotal - coreDelta - dramDelta - gpuDelta
@@ -192,9 +192,10 @@ func (c *Collector) reader() {
 				aggBytesWrite = 0
 				cgroupIO := make(map[uint64]bool)
 				gpuEnergy, _ = gpu.GetCurrGpuEnergyPerPid()
-				for _, v := range podEnergy {
+				for _, v := range containerEnergy {
 					v.CurrCPUCycles = 0
 					v.CurrCPUTime = 0
+
 					v.CurrCacheMisses = 0
 					v.CurrCPUInstr = 0
 					v.CurrBytesRead = 0
@@ -209,23 +210,23 @@ func (c *Collector) reader() {
 					}
 					comm := (*C.char)(unsafe.Pointer(&ct.Command))
 					// fmt.Printf("pid %v cgroup %v cmd %v\n", ct.PID, ct.CGroupPID, C.GoString(comm))
-					podName, err := pod_lister.GetPodNameFromcGgroupID(ct.CGroupPID)
+					containerName, err := pod_lister.GetPodNameFromcGgroupID(ct.CGroupPID)
 					if err != nil {
 						log.Printf("failed to resolve pod for cGroup ID %v: %v", ct.CGroupPID, err)
 						continue
 					}
-					if _, ok := podEnergy[podName]; !ok {
-						podEnergy[podName] = &PodEnergy{}
-						podEnergy[podName].PodName = podName
-						podNamespace, err := pod_lister.GetPodNameSpaceFromcGgroupID(ct.CGroupPID)
+					if _, ok := containerEnergy[containerName]; !ok {
+						containerEnergy[containerName] = &ContainerEnergy{}
+						containerEnergy[containerName].ContainerName = containerName
+						containerNamespace, err := pod_lister.GetPodNameSpaceFromcGgroupID(ct.CGroupPID)
 						if err != nil {
 							log.Printf("failed to find namespace for cGroup ID %v: %v", ct.CGroupPID, err)
-							podNamespace = "unknown"
+							containerNamespace = "unknown"
 						}
-						podEnergy[podName].Namespace = podNamespace
-						podEnergy[podName].CGroupPID = ct.CGroupPID
-						podEnergy[podName].PID = ct.PID
-						podEnergy[podName].Command = C.GoString(comm)
+						containerEnergy[containerName].Namespace = containerNamespace
+						containerEnergy[containerName].CGroupPID = ct.CGroupPID
+						containerEnergy[containerName].PID = ct.PID
+						containerEnergy[containerName].Command = C.GoString(comm)
 					}
 					if attacher.EnableCPUFreq {
 						avgFreq, totalCPUTime = getAVGCPUFreqAndTotalCPUTime(cpuFrequency, ct.CPUTime)
@@ -234,27 +235,27 @@ func (c *Collector) reader() {
 					}
 					// to prevent overflow of the counts we change the unit to have smaller numbers
 					totalCPUTime = totalCPUTime / 1000
-					podEnergy[podName].CurrCPUTime += totalCPUTime
-					podEnergy[podName].AggCPUTime += totalCPUTime
+					containerEnergy[containerName].CurrCPUTime += totalCPUTime
+					containerEnergy[containerName].AggCPUTime += totalCPUTime
 					aggCPUTime += totalCPUTime
 					val := ct.CPUCycles
-					podEnergy[podName].CurrCPUCycles += val
-					podEnergy[podName].AggCPUCycles += val
+					containerEnergy[containerName].CurrCPUCycles += val
+					containerEnergy[containerName].AggCPUCycles += val
 					aggCPUCycles += val
 					val = ct.CPUInstr
-					podEnergy[podName].CurrCPUInstr += val
-					podEnergy[podName].AggCPUInstr += val
+					containerEnergy[containerName].CurrCPUInstr += val
+					containerEnergy[containerName].AggCPUInstr += val
 					aggCPUInstr += val
 					val = ct.CacheMisses
-					podEnergy[podName].CurrCacheMisses += val
-					podEnergy[podName].AggCacheMisses += val
+					containerEnergy[containerName].CurrCacheMisses += val
+					containerEnergy[containerName].AggCacheMisses += val
 					aggCacheMisses += val
 
-					podEnergy[podName].AvgCPUFreq = avgFreq
+					containerEnergy[containerName].AvgCPUFreq = avgFreq
 					if e, ok := gpuEnergy[uint32(ct.PID)]; ok {
-						// fmt.Printf("gpu energy pod %v comm %v pid %v: %v\n", podName, C.GoString(comm), ct.PID, e)
-						podEnergy[podName].CurrEnergyInGPU += uint64(e)
-						podEnergy[podName].AggEnergyInGPU += podEnergy[podName].CurrEnergyInGPU
+						// fmt.Printf("gpu energy pod %v comm %v pid %v: %v\n", containerName, C.GoString(comm), ct.PID, e)
+						containerEnergy[containerName].CurrEnergyInGPU += uint64(e)
+						containerEnergy[containerName].AggEnergyInGPU += containerEnergy[containerName].CurrEnergyInGPU
 					}
 					rBytes, wBytes, disks, err := pod_lister.ReadCgroupIOStat(ct.CGroupPID)
 					// fmt.Printf("read %d write %d. Agg read %d write %d, err %v\n", rBytes, wBytes, aggBytesRead, aggBytesWrite, err)
@@ -262,13 +263,13 @@ func (c *Collector) reader() {
 						// if this is the first time the cgroup's I/O is accounted, add it to the pod
 						if _, ok := cgroupIO[ct.CGroupPID]; !ok {
 							cgroupIO[ct.CGroupPID] = true
-							if disks > podEnergy[podName].Disks {
-								podEnergy[podName].Disks = disks
+							if disks > containerEnergy[containerName].Disks {
+								containerEnergy[containerName].Disks = disks
 							}
 							// save the current I/O in CurrByteRead and adjust it later
-							podEnergy[podName].CurrBytesRead += rBytes
+							containerEnergy[containerName].CurrBytesRead += rBytes
 							aggBytesRead += rBytes
-							podEnergy[podName].CurrBytesWrite += wBytes
+							containerEnergy[containerName].CurrBytesWrite += wBytes
 							aggBytesWrite += wBytes
 						}
 					}
@@ -281,16 +282,16 @@ func (c *Collector) reader() {
 						rBytes := totalReadBytes - aggBytesRead
 						wBytes := totalWriteBytes - aggBytesWrite
 						podName := pod_lister.GetSystemProcessName()
-						podEnergy[podName].Disks = disks
-						podEnergy[podName].CurrBytesRead = rBytes
-						podEnergy[podName].CurrBytesWrite = wBytes
+						containerEnergy[podName].Disks = disks
+						containerEnergy[podName].CurrBytesRead = rBytes
+						containerEnergy[podName].CurrBytesWrite = wBytes
 					} else {
 						fmt.Printf("total read %d write %d should be greater than agg read %d agg write %d\n", totalReadBytes, totalWriteBytes, aggBytesRead, aggBytesWrite)
 					}
 				}
 
 				//evenly attribute other energy among all pods
-				perProcessOtherMJ := float64(otherDelta / float64(len(podEnergy)))
+				perProcessOtherMJ := float64(otherDelta / float64(len(containerEnergy)))
 
 				_, podMem, _, nodeMem, err := pod_lister.GetPodMetrics()
 				if err != nil {
@@ -299,7 +300,7 @@ func (c *Collector) reader() {
 
 				log.Printf("energy count: core %.2f dram: %.2f time %.6f cycles %d instructions %d misses %d node memory %f\n",
 					coreDelta, dramDelta, aggCPUTime, aggCPUCycles, aggCPUInstr, aggCacheMisses, nodeMem)
-				currNodeEnergy = &CurrNodeEnergy{
+				currEdgeDeviceEnergy = &CurrEdgeDeviceEnergy{
 					CPUTime:       aggCPUTime,
 					CPUCycles:     aggCPUCycles,
 					CPUInstr:      aggCPUInstr,
@@ -310,7 +311,7 @@ func (c *Collector) reader() {
 					EnergyInOther: otherDelta,
 					EnergyInGPU:   gpuDelta,
 				}
-				for podName, v := range podEnergy {
+				for containerName, v := range containerEnergy {
 					cpuTimeRatio := float64(0.0)
 					cpuCycleRatio := float64(0.0)
 					cpuInstrRatio := float64(0.0)
@@ -333,7 +334,7 @@ func (c *Collector) reader() {
 					if v.CurrCacheMisses > 0 {
 						dyMemRatio = float64(v.CurrCacheMisses) / float64(aggCacheMisses) * dramDelta * model.RunTimeCoeff.CacheMisses
 					}
-					k := v.Namespace + "/" + podName
+					k := v.Namespace + "/" + containerName
 					if mem, ok := podMem[k]; ok {
 						v.CurrResidentMem = uint64(mem)
 						bgMemRatio = float64(mem/nodeMem) * dramDelta * model.RunTimeCoeff.MemoryUsage
@@ -361,7 +362,7 @@ func (c *Collector) reader() {
 							"\tCPUTime: %.2f (%.4f) \n\tcycles: %d (%.4f) \n\tinstructions: %d (%.4f) \n"+
 							"\tDiskReadBytes: %d (%d) \n\tDiskWriteBytes: %d (%d)\n"+
 							"\tmisses: %d (%.4f)\tResidentMemRatio: %.4f\n\tavgCPUFreq: %.4f MHZ\n\tpid: %v comm: %v\n",
-							podName, v.Namespace,
+							containerName, v.Namespace,
 							v.CurrEnergyInCore, v.AggEnergyInCore,
 							v.CurrEnergyInDram, v.AggEnergyInDram,
 							v.CurrEnergyInOther, v.AggEnergyInOther,
