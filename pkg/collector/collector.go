@@ -98,10 +98,10 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	lock.Lock()
 	defer lock.Unlock()
 	de := prometheus.NewDesc(
-		"node_energy_stat",
-		"Node energy consumption stats",
+		"EdgeDevice_energy_stat",
+		"EdgeDevice energy consumption stats",
 		[]string{
-			"node_name",
+			"EdgeDevice_name",
 			"cpu_architecture",
 			"curr_cpu_time",
 			"curr_cpu_cycles",
@@ -115,22 +115,22 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		},
 		nil,
 	)
-	cpuTime := fmt.Sprintf("%f", currNodeEnergy.CPUTime)
-	energyInCore := fmt.Sprintf("%f", currNodeEnergy.EnergyInCore)
-	energyInDram := fmt.Sprintf("%f", currNodeEnergy.EnergyInDram)
-	energyInOther := fmt.Sprintf("%f", currNodeEnergy.EnergyInOther)
-	energyInGpu := fmt.Sprintf("%f", currNodeEnergy.EnergyInGPU)
-	resMem := fmt.Sprintf("%f", currNodeEnergy.NodeMem)
+	cpuTime := fmt.Sprintf("%f", currEdgeDeviceEnergy.CPUTime)
+	energyInCore := fmt.Sprintf("%f", currEdgeDeviceEnergy.EnergyInCore)
+	energyInDram := fmt.Sprintf("%f", currEdgeDeviceEnergy.EnergyInDram)
+	energyInOther := fmt.Sprintf("%f", currEdgeDeviceEnergy.EnergyInOther)
+	energyInGpu := fmt.Sprintf("%f", currEdgeDeviceEnergy.EnergyInGPU)
+	resMem := fmt.Sprintf("%f", currEdgeDeviceEnergy.EdgeDeviceMem)
 	desc := prometheus.MustNewConstMetric(
 		de,
 		prometheus.CounterValue,
-		currNodeEnergy.EnergyInCore+currNodeEnergy.EnergyInDram+currNodeEnergy.EnergyInOther+currNodeEnergy.EnergyInGPU,
-		nodeName, cpuArch,
+		currEdgeDeviceEnergy.EnergyInCore+currEdgeDeviceEnergy.EnergyInDram+currEdgeDeviceEnergy.EnergyInOther+currEdgeDeviceEnergy.EnergyInGPU,
+		EdgeDeviceName, cpuArch,
 		cpuTime,
-		strconv.FormatUint(currNodeEnergy.CPUCycles, 10),
-		strconv.FormatUint(currNodeEnergy.CPUInstr, 10),
+		strconv.FormatUint(currEdgeDeviceEnergy.CPUCycles, 10),
+		strconv.FormatUint(currEdgeDeviceEnergy.CPUInstr, 10),
 		resMem,
-		strconv.FormatUint(currNodeEnergy.CacheMisses, 10),
+		strconv.FormatUint(currEdgeDeviceEnergy.CacheMisses, 10),
 		energyInCore, energyInDram, energyInGpu, energyInOther,
 	)
 	ch <- desc
@@ -373,10 +373,10 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 
 	}
 
-	// de_node_energy and desc_node_energy give indexable values for total energy consumptions of a node
-	de_node_energy := prometheus.NewDesc(
-		"node_hwmon_energy_joule_total",
-		"Hardware monitor for energy consumed in joules in the node.",
+	// de_EdgeDevice_energy and desc_EdgeDevice_energy give indexable values for total energy consumptions of a EdgeDevice
+	de_EdgeDevice_energy := prometheus.NewDesc(
+		"EdgeDevice_hwmon_energy_joule_total",
+		"Hardware monitor for energy consumed in joules in the EdgeDevice.",
 		[]string{
 			"instance",
 			"chip",
@@ -384,12 +384,12 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		},
 		nil,
 	)
-	for sensorID, energy := range nodeEnergy {
+	for sensorID, energy := range EdgeDeviceEnergy {
 		desc_total := prometheus.MustNewConstMetric(
-			de_node_energy,
+			de_EdgeDevice_energy,
 			prometheus.CounterValue,
 			energy/1000.0, /*miliJoule to Joule*/
-			nodeName,
+			EdgeDeviceName,
 			sensorID,
 			"power_meter",
 		)

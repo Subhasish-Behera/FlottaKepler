@@ -88,11 +88,11 @@ type ContainerEnergy struct {
 }
 
 type CurrEdgeDeviceEnergy struct {
-	CPUTime     float64
-	CPUCycles   uint64
-	CPUInstr    uint64
-	CacheMisses uint64
-	NodeMem     float64
+	CPUTime       float64
+	CPUCycles     uint64
+	CPUInstr      uint64
+	CacheMisses   uint64
+	EdgeDeviceMem float64
 
 	EnergyInCore  float64
 	EnergyInDram  float64
@@ -293,19 +293,19 @@ func (c *Collector) reader() {
 				//evenly attribute other energy among all pods
 				perProcessOtherMJ := float64(otherDelta / float64(len(containerEnergy)))
 
-				_, podMem, _, nodeMem, err := pod_lister.GetPodMetrics()
+				_, podMem, _, EdgeDeviceMem, err := pod_lister.GetPodMetrics()
 				if err != nil {
 					fmt.Printf("failed to get kubelet metrics: %v", err)
 				}
 
-				log.Printf("energy count: core %.2f dram: %.2f time %.6f cycles %d instructions %d misses %d node memory %f\n",
-					coreDelta, dramDelta, aggCPUTime, aggCPUCycles, aggCPUInstr, aggCacheMisses, nodeMem)
+				log.Printf("energy count: core %.2f dram: %.2f time %.6f cycles %d instructions %d misses %d EdgeDevice memory %f\n",
+					coreDelta, dramDelta, aggCPUTime, aggCPUCycles, aggCPUInstr, aggCacheMisses, EdgeDeviceMem)
 				currEdgeDeviceEnergy = &CurrEdgeDeviceEnergy{
 					CPUTime:       aggCPUTime,
 					CPUCycles:     aggCPUCycles,
 					CPUInstr:      aggCPUInstr,
 					CacheMisses:   aggCacheMisses,
-					NodeMem:       nodeMem,
+					EdgeDeviceMem: EdgeDeviceMem,
 					EnergyInCore:  coreDelta,
 					EnergyInDram:  dramDelta,
 					EnergyInOther: otherDelta,
@@ -337,7 +337,7 @@ func (c *Collector) reader() {
 					k := v.Namespace + "/" + containerName
 					if mem, ok := podMem[k]; ok {
 						v.CurrResidentMem = uint64(mem)
-						bgMemRatio = float64(mem/nodeMem) * dramDelta * model.RunTimeCoeff.MemoryUsage
+						bgMemRatio = float64(mem/EdgeDeviceMem) * dramDelta * model.RunTimeCoeff.MemoryUsage
 					}
 					v.CurrEnergyInDram = uint64(dyMemRatio + bgMemRatio)
 					v.AggEnergyInDram += v.CurrEnergyInDram
@@ -373,7 +373,7 @@ func (c *Collector) reader() {
 							v.CurrBytesRead, v.AggBytesRead,
 							v.CurrBytesRead, v.AggBytesWrite,
 							v.CurrCacheMisses, float64(v.CurrCacheMisses)/float64(aggCacheMisses),
-							float64(v.CurrResidentMem)/nodeMem,
+							float64(v.CurrResidentMem)/EdgeDeviceMem,
 							v.AvgCPUFreq/1000, /*MHZ*/
 							v.PID, v.Command)
 					}
